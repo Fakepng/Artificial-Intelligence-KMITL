@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MNIST Prediction</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      text-align: center;
+    }
+    input {
+      margin: 15px 0;
+    }
+    #preview {
+      margin-top: 10px;
+      max-width: 200px;
+    }
+    .result {
+      margin-top: 20px;
+      font-size: 20px;
+      font-weight: bold;
+      color: darkblue;
+    }
+  </style>
+</head>
+<body>
+  <h1>MNIST Digit Prediction</h1>
+  <input type="file" id="fileInput" accept="image/*">
+  <br>
+  <button onclick="uploadImage()">Predict</button>
+  <br>
+  <img id="preview" />
+  <div class="result" id="result"></div>
+
+  <script>
+  function uploadImage() {
+    const fileInput = document.getElementById("fileInput");
+    if (fileInput.files.length === 0) {
+      alert("Please select an image first.");
+      return;
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+
+    reader.onloadend = function () {
+      const base64data = reader.result;
+
+      document.getElementById("preview").src = base64data;
+
+      fetch("https://tafern.consolutechcloud.com", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_base64: base64data })
+      })
+        .then(response => response.json())
+        .then(data => {
+          console.log("Response from backend:", data); // ✅ debug ตรงนี้
+          if (data.predicted_class !== undefined) {
+            document.getElementById("result").innerText =
+              "Predicted Class: " + data.predicted_class;
+          } else {
+            document.getElementById("result").innerText =
+              "Error: " + JSON.stringify(data);
+          }
+        })
+        .catch(error => {
+          console.error("Error:", error);
+          document.getElementById("result").innerText = "Request failed!";
+        });
+    };
+
+    reader.readAsDataURL(file);
+  }
+</script>
+</body>
+</html>

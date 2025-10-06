@@ -1,0 +1,4 @@
+project/.env
+hardware/carbon-sensor/secret.txt
+project/secret.txt
+project/project-hvac.tar

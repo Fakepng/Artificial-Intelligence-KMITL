@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Room Crowdedness</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <div>
+          <p class="header-tagline">live occupancy monitor</p>
+          <h1 class="header-title">Room Crowdedness</h1>
+        </div>
+        <a href="/" class="header-link">Refresh</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="dashboard-top">
+        <div class="card card--primary">
+          <div class="card__content">
+            <div class="device-row">
+              <div>
+                <p class="device-row__label">Tracked device</p>
+                <div class="device-row__controls">
+                  <input
+                    id="deviceInput"
+                    class="device-input"
+                    value="room-1"
+                    readonly
+                  />
+                  <button id="connectBtn" class="btn btn--primary btn--compact">
+                    Reconnect
+                  </button>
+                </div>
+              </div>
+              <div class="status-wrapper">
+                <div class="status-label-row">
+                  <p class="status-label">WebSocket status</p>
+                  <button
+                    class="status-tooltip-trigger"
+                    id="statusTooltipToggle"
+                    type="button"
+                    aria-label="Show connection guidance"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M8 3.333a.833.833 0 0 1 .833.834v.666a.833.833 0 1 1-1.666 0v-.666A.833.833 0 0 1 8 3.333Zm0 3.334a.667.667 0 0 1 .667.666v3.334a.667.667 0 1 1-1.334 0V7.333A.667.667 0 0 1 8 6.667Zm0 6.666a.833.833 0 1 1 0-1.666.833.833 0 0 1 0 1.666Z"
+                        fill="currentColor"
+                      ></path>
+                    </svg>
+                  </button>
+                  <div
+                    class="tooltip-bubble tooltip-bubble--status"
+                    id="statusTooltip"
+                    data-open="false"
+                  >
+                    <p class="tooltip-title">Connection tips</p>
+                    <ul class="info-list">
+                      <li class="info-item info-item--ok">
+                        <span></span>
+                        <p>
+                          Green pulse means the live WebSocket is streaming
+                          telemetry.
+                        </p>
+                      </li>
+                      <li class="info-item info-item--warn">
+                        <span></span>
+                        <p>
+                          Amber indicates the dashboard is trying to reconnect.
+                        </p>
+                      </li>
+                      <li class="info-item info-item--error">
+                        <span></span>
+                        <p>
+                          Red shows the stream is offline — check the sensor or
+                          broker.
+                        </p>
+                      </li>
+                    </ul>
+                    <button
+                      id="connectBtnSecondary"
+                      class="btn btn--ghost btn--mini"
+                    >
+                      Refresh connection
+                    </button>
+                  </div>
+                </div>
+                <div
+                  class="status-indicator"
+                  id="wsStatusIndicator"
+                  data-state="disconnected"
+                >
+                  <span class="status-indicator__dot" id="wsStatusDot">
+                    <span
+                      class="status-indicator__pulse"
+                      id="wsStatusPulse"
+                    ></span>
+                  </span>
+                  <span class="status-indicator__text" id="wsStatusText"
+                    >disconnected</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <div class="metrics-grid metrics-grid--primary">
+              <div class="metric-card metric-card--accent metric-card--crowded">
+                <p class="metric-label">Crowded level</p>
+                <div class="crowded-body">
+                  <div class="crowded-gauge-wrap">
+                    <svg
+                      id="gauge"
+                      viewBox="0 0 120 60"
+                      class="crowded-gauge"
+                      preserveAspectRatio="xMidYMid meet"
+                    >
+                      <path
+                        d="M10,60 A50,50 0 0 1 110,60"
+                        fill="none"
+                        stroke="#e5e7eb"
+                        stroke-width="12"
+                        stroke-linecap="round"
+                      ></path>
+                      <path
+                        id="gaugeArc"
+                        d="M10,60 A50,50 0 0 1 110,60"
+                        fill="none"
+                        stroke="#6366f1"
+                        stroke-width="12"
+                        stroke-linecap="round"
+                        stroke-dasharray="157"
+                        stroke-dashoffset="157"
+                      ></path>
+                      <circle
+                        id="gaugeDot"
+                        cx="10"
+                        cy="60"
+                        r="5"
+                        fill="#6366f1"
+                      ></circle>
+                    </svg>
+                  </div>
+                  <div class="crowded-meta">
+                    <span id="crowdLabel" class="crowded-chip">Unknown</span>
+                    <p class="metric-footer">
+                      Score · <span id="crowdScore">—</span>
+                    </p>
+                    <p class="metric-footer">
+                      Last update · <span id="lastTs">—</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="metric-subgrid">
+                <div class="metric-card metric-card--compact">
+                  <p class="metric-label">Current CO₂</p>
+                  <p class="metric-value metric-value--xl">
+                    <span id="co2">—</span
+                    ><span class="metric-suffix">ppm</span>
+                  </p>
+                </div>
+                <div class="metric-card metric-card--compact">
+                  <p class="metric-label">Temperature</p>
+                  <p class="metric-value">
+                    <span id="temperature">—</span
+                    ><span class="metric-suffix">°C</span>
+                  </p>
+                  <p class="metric-footer">Ambient sensor</p>
+                </div>
+                <div class="metric-card metric-card--compact">
+                  <p class="metric-label">Humidity</p>
+                  <p class="metric-value">
+                    <span id="humidity">—</span
+                    ><span class="metric-suffix">%</span>
+                  </p>
+                  <p class="metric-footer">Relative humidity</p>
+                </div>
+              </div>
+            </div>
+            <div class="metrics-row">
+              <div
+                class="metric-card metric-card--compact metric-card--rolling"
+              >
+                <p class="metric-label">Rolling means</p>
+                <div class="rolling-grid">
+                  <div class="rolling-item">
+                    <p class="metric-footer">15 min</p>
+                    <p class="metric-value">
+                      <span id="rm15">—</span
+                      ><span class="metric-suffix">ppm</span>
+                    </p>
+                  </div>
+                  <div class="rolling-item">
+                    <p class="metric-footer">5 min</p>
+                    <p class="metric-value">
+                      <span id="rm5">—</span
+                      ><span class="metric-suffix">ppm</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card info-card">
+          <div>
+            <p class="info-title">Carbon levels impact</p>
+            <p class="info-subtitle">
+              Understand how CO₂ affects people and what to do next.
+            </p>
+          </div>
+          <ul class="carbon-guidelines">
+            <li class="carbon-guidelines__item">
+              <span
+                class="carbon-guidelines__level carbon-guidelines__level--good"
+              >
+                ≤ 800 ppm
+              </span>
+              <p>Fresh air and sharp focus. Keep ventilation steady.</p>
+            </li>
+            <li class="carbon-guidelines__item">
+              <span
+                class="carbon-guidelines__level carbon-guidelines__level--watch"
+              >
+                800–1200 ppm
+              </span>
+              <p>Mild stuffiness may appear. Increase airflow if possible.</p>
+            </li>
+            <li class="carbon-guidelines__item">
+              <span
+                class="carbon-guidelines__level carbon-guidelines__level--warn"
+              >
+                1200–2000 ppm
+              </span>
+              <p>
+                Expect drowsiness and slower decision-making. Open doors or
+                windows and run fans.
+              </p>
+            </li>
+            <li class="carbon-guidelines__item">
+              <span
+                class="carbon-guidelines__level carbon-guidelines__level--alert"
+              >
+                &gt; 2000 ppm
+              </span>
+              <p>
+                Headaches and nausea likely. Evacuate briefly and flush the room
+                with outside air.
+              </p>
+            </li>
+          </ul>
+          <p class="info-note">
+            Action needed: follow the guidance above whenever the live
+            crowdedness score climbs into the yellow, orange, or red zones.
+          </p>
+        </div>
+      </section>
+
+      <section class="card chart-card">
+        <div class="chart-header">
+          <div>
+            <p class="chart-title">trend</p>
+            <h2 class="chart-heading">CO₂ over time</h2>
+          </div>
+          <p class="chart-copy">
+            The chart keeps the most recent four hours of observations and
+            updates instantly when new telemetry arrives.
+          </p>
+        </div>
+        <div class="chart-body">
+          <canvas id="co2Chart"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (async function () {
+        const elDevice = document.getElementById("deviceInput");
+        const connectButtons = [
+          document.getElementById("connectBtn"),
+          document.getElementById("connectBtnSecondary"),
+        ].filter(Boolean);
+        const elStatusIndicator = document.getElementById("wsStatusIndicator");
+        const elStatusText = document.getElementById("wsStatusText");
+        const elStatusDot = document.getElementById("wsStatusDot");
+        const elStatusPulse = document.getElementById("wsStatusPulse");
+
+        const elCO2 = document.getElementById("co2");
+        const elTs = document.getElementById("lastTs");
+        const elLabel = document.getElementById("crowdLabel");
+        const elScore = document.getElementById("crowdScore");
+        const elRM15 = document.getElementById("rm15");
+        const elRM5 = document.getElementById("rm5");
+        const elTemp = document.getElementById("temperature");
+        const elHumid = document.getElementById("humidity");
+        const statusTooltipToggle = document.getElementById(
+          "statusTooltipToggle"
+        );
+        const statusTooltip = document.getElementById("statusTooltip");
+
+        const gaugeArc = document.getElementById("gaugeArc");
+        const gaugeDot = document.getElementById("gaugeDot");
+        const ARC_LEN = gaugeArc ? gaugeArc.getTotalLength() : 157;
+        if (gaugeArc) {
+          gaugeArc.setAttribute("stroke-dasharray", ARC_LEN.toFixed(2));
+          gaugeArc.setAttribute("stroke-dashoffset", ARC_LEN.toFixed(2));
+        }
+        const MAX_POINTS = 240;
+        let lastPointIso = null;
+
+        const STATUS_META = {
+          connecting: { text: "connecting…", color: "#fbbf24" },
+          connected: { text: "connected", color: "#10b981" },
+          disconnected: { text: "disconnected", color: "#ef4444" },
+        };
+
+        let statusTooltipOpen = false;
+
+        function setStatusTooltip(open) {
+          if (!statusTooltip) return;
+          statusTooltipOpen = !!open;
+          statusTooltip.setAttribute(
+            "data-open",
+            statusTooltipOpen ? "true" : "false"
+          );
+        }
+
+        if (statusTooltipToggle && statusTooltip) {
+          statusTooltipToggle.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setStatusTooltip(!statusTooltipOpen);
+          });
+
+          statusTooltipToggle.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setStatusTooltip(!statusTooltipOpen);
+            } else if (event.key === "Escape") {
+              setStatusTooltip(false);
+              statusTooltipToggle.blur();
+            }
+          });
+
+          document.addEventListener("click", (event) => {
+            if (
+              !statusTooltipToggle.contains(event.target) &&
+              !statusTooltip.contains(event.target)
+            ) {
+              setStatusTooltip(false);
+            }
+          });
+
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              setStatusTooltip(false);
+            }
+          });
+        }
+
+        function setStatus(state) {
+          const meta = STATUS_META[state] || STATUS_META.disconnected;
+          elStatusText.textContent = meta.text;
+          if (elStatusIndicator) {
+            elStatusIndicator.dataset.state = state;
+            elStatusIndicator.style.setProperty(
+              "--indicator-color",
+              meta.color
+            );
+            if (state !== "disconnected") {
+              elStatusIndicator.classList.add("status-indicator--active");
+            } else {
+              elStatusIndicator.classList.remove("status-indicator--active");
+            }
+          }
+          elStatusDot.style.backgroundColor = meta.color;
+          elStatusPulse.style.backgroundColor = meta.color;
+        }
+
+        function setGauge(v) {
+          const c = Math.max(0, Math.min(1, Number(v) || 0));
+          if (gaugeArc) {
+            gaugeArc.setAttribute("stroke-dashoffset", `${ARC_LEN * (1 - c)}`);
+          }
+          const angle = -180 + 180 * c;
+          const r = 50;
+          const cx0 = 60;
+          const cy0 = 60;
+          const rad = (angle * Math.PI) / 180;
+          if (gaugeDot) {
+            gaugeDot.setAttribute("cx", (cx0 + r * Math.cos(rad)).toFixed(2));
+            gaugeDot.setAttribute("cy", (cy0 + r * Math.sin(rad)).toFixed(2));
+          }
+        }
+
+        const labels = [];
+        const co2Data = [];
+        const ctx = document.getElementById("co2Chart").getContext("2d");
+        const gradientFill = ctx.createLinearGradient(0, 0, 0, 220);
+        gradientFill.addColorStop(0, "rgba(79, 70, 229, 0.35)");
+        gradientFill.addColorStop(1, "rgba(79, 70, 229, 0)");
+        const chart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "CO₂ (ppm)",
+                data: co2Data,
+                borderColor: "#4f46e5",
+                backgroundColor: gradientFill,
+                fill: true,
+                tension: 0.25,
+                borderWidth: 2,
+                pointRadius: 0,
+              },
+            ],
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                ticks: {
+                  color: "#94a3b8",
+                  maxTicksLimit: 8,
+                },
+                grid: {
+                  display: false,
+                },
+              },
+              y: {
+                ticks: {
+                  color: "#94a3b8",
+                },
+                grid: {
+                  color: "rgba(148, 163, 184, 0.15)",
+                  drawBorder: false,
+                },
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: "rgba(15, 23, 42, 0.85)",
+                borderColor: "rgba(255,255,255,0.1)",
+                borderWidth: 1,
+                titleColor: "#e2e8f0",
+                bodyColor: "#f8fafc",
+                displayColors: false,
+                callbacks: {
+                  label: (ctx) => {
+                    const value = ctx.parsed && ctx.parsed.y;
+                    if (value == null || Number.isNaN(value)) {
+                      return "";
+                    }
+                    return `${Number(value).toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })} ppm`;
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        function fmt(x, d = 0) {
+          if (x == null || isNaN(x)) return "—";
+          return Number(x).toLocaleString(undefined, {
+            minimumFractionDigits: d,
+            maximumFractionDigits: d,
+          });
+        }
+
+        function formatLabel(ts) {
+          return ts.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        }
+
+        function updateChartPoint(tsIso, tsDate, co2Value) {
+          const value = Number(co2Value);
+          if (!Number.isFinite(value)) {
+            if (tsIso) {
+              lastPointIso = tsIso;
+            }
+            return;
+          }
+          labels.push(formatLabel(tsDate));
+          co2Data.push(value);
+          if (labels.length > MAX_POINTS) {
+            labels.shift();
+            co2Data.shift();
+          }
+          lastPointIso = tsIso;
+          chart.update("none");
+        }
+
+        const deviceId = "room-1";
+        if (elDevice) {
+          elDevice.value = deviceId;
+          elDevice.setAttribute("readonly", "readonly");
+          elDevice.classList.add("device-input--locked");
+        }
+
+        let sock = null;
+        let reconnectTimer = null;
+
+        function applyPrediction(msg, options = {}) {
+          if (!msg || msg.type !== "prediction") return;
+          const { appendToChart = true } = options;
+
+          let tsIso = msg.at || null;
+          const ts = tsIso ? new Date(tsIso) : new Date();
+          if (Number.isNaN(ts.getTime())) {
+            tsIso = null;
+          }
+
+          elTs.textContent = ts.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          });
+
+          elCO2.textContent = fmt(msg.co2, 0);
+
+          const pred = msg.prediction || {};
+          const level = pred.crowded_level || {
+            label: "Unknown",
+            color: "#6b7280",
+          };
+          const score = pred.crowded_score;
+
+          elLabel.textContent = level.label || "Unknown";
+          elLabel.style.background = level.color || "#6b7280";
+          gaugeArc.setAttribute("stroke", level.color || "#6366f1");
+          gaugeDot.setAttribute("fill", level.color || "#6366f1");
+          elScore.textContent =
+            typeof score === "number" ? `${(score * 100).toFixed(0)}%` : "—";
+          setGauge(typeof score === "number" ? score : 0);
+
+          const feats = pred.features || {};
+          const tempValue = msg.temp ?? feats.temp ?? feats.temperature ?? null;
+          const humidValue = msg.humid ?? feats.humid ?? feats.humidity ?? null;
+          if (elTemp) {
+            elTemp.textContent = fmt(tempValue, 1);
+          }
+          if (elHumid) {
+            elHumid.textContent = fmt(humidValue, 0);
+          }
+          elRM15.textContent = fmt(feats.co2_rm_15m, 0);
+          elRM5.textContent = fmt(feats.co2_rm_5m, 0);
+
+          if (appendToChart) {
+            if (tsIso && tsIso === lastPointIso) {
+              return;
+            }
+            if (!Number.isFinite(Number(msg.co2))) {
+              if (tsIso) {
+                lastPointIso = tsIso;
+              }
+              return;
+            }
+            const isoForChart = tsIso || ts.toISOString();
+            updateChartPoint(isoForChart, ts, msg.co2);
+          } else if (tsIso) {
+            lastPointIso = tsIso;
+          }
+        }
+
+        async function loadHistory() {
+          try {
+            const res = await fetch(
+              `/api/history?device_id=${encodeURIComponent(
+                deviceId
+              )}&limit=${MAX_POINTS}`,
+              { cache: "no-store" }
+            );
+            if (!res.ok) {
+              throw new Error(`history status ${res.status}`);
+            }
+            const payload = await res.json();
+            let historyTail = null;
+            let lastTemp = null;
+            let lastHumid = null;
+            if (Array.isArray(payload.history)) {
+              labels.length = 0;
+              co2Data.length = 0;
+              let latestIso = null;
+              payload.history.forEach((point) => {
+                if (!point || !point.at) return;
+                const ts = new Date(point.at);
+                if (Number.isNaN(ts.getTime())) return;
+                const value = Number(point.co2);
+                if (!Number.isFinite(value)) return;
+                labels.push(formatLabel(ts));
+                co2Data.push(value);
+                latestIso = point.at;
+                historyTail = point;
+                if (point.temp != null) {
+                  lastTemp = point.temp;
+                }
+                if (point.humid != null) {
+                  lastHumid = point.humid;
+                }
+              });
+              lastPointIso = latestIso;
+              chart.update("none");
+            }
+
+            const latest = payload.latest;
+            if (latest && latest.type === "prediction") {
+              const hydratedLatest = { ...latest };
+              if (hydratedLatest.temp == null) {
+                hydratedLatest.temp =
+                  lastTemp ?? (historyTail && historyTail.temp) ?? null;
+              }
+              if (hydratedLatest.humid == null) {
+                hydratedLatest.humid =
+                  lastHumid ?? (historyTail && historyTail.humid) ?? null;
+              }
+              applyPrediction(hydratedLatest, { appendToChart: false });
+            } else if (historyTail) {
+              const fallback = historyTail;
+              applyPrediction(
+                {
+                  type: "prediction",
+                  device_id: payload.device_id || deviceId,
+                  at: fallback.at,
+                  co2: fallback.co2,
+                  temp: fallback.temp ?? lastTemp ?? null,
+                  humid: fallback.humid ?? lastHumid ?? null,
+                  prediction: {
+                    crowded_level: { label: "Unknown", color: "#6b7280" },
+                    crowded_score: null,
+                    features: {},
+                    model: "history",
+                  },
+                },
+                { appendToChart: false }
+              );
+            }
+          } catch (error) {
+            console.error("[history] load failed", error);
+          }
+        }
+
+        function cleanupSocket() {
+          if (sock) {
+            try {
+              sock.onclose = null;
+              sock.onerror = null;
+              sock.onmessage = null;
+              sock.close();
+            } catch (error) {}
+          }
+          sock = null;
+        }
+
+        function scheduleReconnect(delay = 2500) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(() => {
+            loadHistory().finally(() => openSocket());
+          }, delay);
+        }
+
+        function openSocket() {
+          cleanupSocket();
+          clearTimeout(reconnectTimer);
+
+          const wsUrl =
+            (location.protocol === "https:" ? "wss://" : "ws://") +
+            location.host +
+            "/ws?device_id=" +
+            encodeURIComponent(deviceId);
+
+          setStatus("connecting");
+          const ws = new WebSocket(wsUrl);
+          sock = ws;
+
+          ws.onopen = () => {
+            setStatus("connected");
+          };
+
+          ws.onclose = () => {
+            setStatus("disconnected");
+            sock = null;
+            scheduleReconnect();
+          };
+
+          ws.onerror = () => {
+            ws.close();
+          };
+
+          ws.onmessage = (ev) => {
+            const msg = JSON.parse(ev.data);
+            applyPrediction(msg);
+          };
+        }
+
+        connectButtons.forEach((btn) =>
+          btn.addEventListener("click", async () => {
+            setStatus("connecting");
+            await loadHistory();
+            openSocket();
+          })
+        );
+
+        setStatus("disconnected");
+        await loadHistory();
+        openSocket();
+      })();
+    </script>
+  </body>
+</html>
