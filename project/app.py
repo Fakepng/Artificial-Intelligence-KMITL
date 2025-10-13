@@ -31,23 +31,45 @@ SITE_NAME = os.getenv("SITE_NAME", "Room Crowdedness")
 PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "")  # e.g., https://crowd.example.com
 
 # MQTT
-MQTT_BROKER = os.getenv("MQTT_BROKER", "")
+MQTT_BROKER = os.getenv("MQTT_BROKER", "172.24.0.110")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")  # optional
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")  # optional
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "")  # payload: {epoch, co2, temp, humid}
-DEFAULT_DEVICE_ID = os.getenv("DEVICE_ID", "")
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", "co2")  # optional
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "co2")  # optional
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "sensors/carbon/telemetry")  # payload: {epoch, co2, temp, humid}
+DEFAULT_DEVICE_ID = os.getenv("DEVICE_ID", "room-1")
 
 # Data windowing
 HOURS_WINDOW = float(os.getenv("HOURS_WINDOW", "6"))  # keep last X hours in memory
 PREDICTION_WINDOW_MINUTES = int(os.getenv("PREDICTION_WINDOW_MINUTES", "15"))  # last N minutes fed to model
 
 # Model
-MODEL_PATH = Path(os.getenv("MODEL_PATH", "models/occupancy_from_co2_model.h5"))
+MODEL_PATH = Path(os.getenv("MODEL_PATH", "models/occupancy_from_co2_xgb_model.h5"))
 MODEL_INPUT_TYPE = os.getenv("MODEL_INPUT_TYPE", "features")  # "features" | "sequence"
 # If "sequence": we build a [T, F] array over the last PREDICTION_WINDOW_MINUTES, resampled to 30s
 
 MAX_OCCUPANCY = float(os.getenv("MAX_OCCUPANCY", "35"))  # used to normalize headcount predictions
+
+# Feature engineering constants
+CO2_LAG_STEPS: Tuple[int, ...] = (1, 2, 3, 5, 10)
+CO2_ROLL_SAMPLE_WINDOW = 5
+CO2_TIME_ROLL_WINDOWS: Dict[str, str] = {
+    "co2_roll_1min": "1T",
+    "co2_roll_3min": "3T",
+    "co2_roll_5min": "5T",
+    "co2_roll_10min": "10T",
+}
+TRAINING_BASE_FEATURES: Tuple[str, ...] = (
+    "co2",
+    "co2_lag_1",
+    "co2_lag_3",
+    "co2_lag_5",
+    "co2_roll_mean_5",
+    "co2_roll_std_5",
+    "co2_diff_1",
+    "co2_pct_change_1",
+    "hour",
+    *CO2_TIME_ROLL_WINDOWS.keys(),
+)
 
 # =========================
 # App init
@@ -196,63 +218,70 @@ def json_float(value: Any) -> Optional[float]:
     return val
 
 
+def compute_training_features(df: pd.DataFrame) -> Optional[Dict[str, float]]:
+    if "co2" not in df.columns:
+        return None
+    df_work = df[["co2"]].copy().sort_index()
+    df_work = df_work.dropna(subset=["co2"])
+    if df_work.empty:
+        return None
+
+    for lag in CO2_LAG_STEPS:
+        df_work[f"co2_lag_{lag}"] = df_work["co2"].shift(lag)
+
+    df_work["co2_roll_mean_5"] = (
+        df_work["co2"].rolling(window=CO2_ROLL_SAMPLE_WINDOW, min_periods=1).mean().shift(1)
+    )
+    df_work["co2_roll_std_5"] = (
+        df_work["co2"].rolling(window=CO2_ROLL_SAMPLE_WINDOW, min_periods=1).std(ddof=0).fillna(0).shift(1)
+    )
+
+    df_work["co2_diff_1"] = df_work["co2"].diff(1).fillna(0)
+    pct_change = df_work["co2"].pct_change(1)
+    pct_change = pct_change.replace([np.inf, -np.inf], np.nan).fillna(0)
+    df_work["co2_pct_change_1"] = pct_change
+
+    for feature_name, window in CO2_TIME_ROLL_WINDOWS.items():
+        df_work[feature_name] = (
+            df_work["co2"].rolling(window, min_periods=1).mean().shift(1)
+        )
+
+    latest = df_work.iloc[-1]
+    timestamp = df_work.index[-1]
+    ts_dt = timestamp.to_pydatetime()
+
+    features: Dict[str, float] = {}
+    for name in TRAINING_BASE_FEATURES:
+        if name == "hour":
+            features[name] = float(ts_dt.hour)
+            continue
+        value = latest.get(name)
+        if value is None or not np.isfinite(value):
+            return None
+        features[name] = float(value)
+
+    features["dayofweek"] = float(ts_dt.weekday())
+    return features
+
+
 def build_pipeline_features(df: pd.DataFrame, feature_cols: List[str]) -> Optional[pd.DataFrame]:
     if not feature_cols:
         return None
-    dfx = df.copy()
-    if "co2" not in dfx.columns:
+    dfx = df.copy().sort_index()
+    since = now_utc() - timedelta(minutes=PREDICTION_WINDOW_MINUTES)
+    dfx = dfx[dfx.index >= since]
+    training_feats = compute_training_features(dfx)
+    if training_feats is None:
         return None
-    co2 = dfx["co2"].dropna()
-    if co2.empty:
-        return None
-    last_idx = co2.index[-1]
 
-    def lag_value(steps: int) -> Optional[float]:
-        if len(co2) <= steps:
-            return None
-        return float(co2.iloc[-(steps + 1)])
-
-    feats: Dict[str, float] = {}
+    row: Dict[str, float] = {}
     for col in feature_cols:
-        if col == "co2":
-            feats[col] = float(co2.iloc[-1])
-        elif col.startswith("co2_lag_"):
-            try:
-                lag = int(col.split("_")[-1])
-            except ValueError:
-                return None
-            val = lag_value(lag)
-            if val is None:
-                return None
-            feats[col] = val
-        elif col == "co2_roll_mean_5":
-            if len(co2) < 5:
-                return None
-            feats[col] = float(co2.iloc[-5:].mean())
-        elif col == "co2_roll_std_5":
-            if len(co2) < 5:
-                return None
-            feats[col] = float(co2.iloc[-5:].std(ddof=0))
-        elif col == "co2_diff_1":
-            if len(co2) < 2:
-                return None
-            feats[col] = float(co2.iloc[-1] - co2.iloc[-2])
-        elif col == "co2_pct_change_1":
-            if len(co2) < 2 or co2.iloc[-2] == 0:
-                return None
-            feats[col] = float((co2.iloc[-1] - co2.iloc[-2]) / co2.iloc[-2])
-        elif col == "hour":
-            feats[col] = float(last_idx.hour)
-        elif col == "dayofweek":
-            feats[col] = float(last_idx.weekday())
-        else:
-            # Allow passthrough for additional numeric columns if present
-            if col in dfx.columns and dfx[col].notna().any():
-                feats[col] = float(dfx[col].dropna().iloc[-1])
-            else:
-                return None
+        value = training_feats.get(col)
+        if value is None or not np.isfinite(value):
+            return None
+        row[col] = value
 
-    return pd.DataFrame([feats])[feature_cols]
+    return pd.DataFrame([row], columns=feature_cols)
 
 
 # Normalise feature dicts so they can be serialised cleanly
@@ -441,6 +470,10 @@ def features_from_df(df: pd.DataFrame) -> Dict[str, Any]:
     co2 = dfx["co2"].dropna()
     temp = dfx["temp"].dropna()
     humid = dfx["humid"].dropna()
+
+    training_feats = compute_training_features(dfx)
+    if training_feats:
+        out.update(training_feats)
 
     if len(co2):
         out["co2_last"] = float(co2.iloc[-1])

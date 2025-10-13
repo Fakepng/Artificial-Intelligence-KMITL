@@ -1,0 +1,50 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+
+# Packaging & build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test & coverage
+htmlcov/
+.coverage
+.coverage.*
+.cache/
+.pytest_cache/
+.tox/
+.nox/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Project settings & logs
+*.log
+*.sqlite3
+*.db
+*.mo
+*.pot
+
+# IDE & tooling
+.vscode/
+.idea/
+.github/
+.git/
+.gitignore
+
+# Docker compose / intermediate files
+docker-compose*.yaml
+Dockerfile.*
+docker-compose.override.yml
+
+secret.txt
